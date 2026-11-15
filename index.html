@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TA-03 Monte Carlo – Risiko Harga Saham</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--tx:#1a1d23;--mut:#5d6573;--bd:#dfe3ea;--ac:#2563eb;--red:#dc2626;--grn:#16a34a}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1218;--card:#181c25;--tx:#e8ebf0;--mut:#98a1b0;--bd:#2a303c;--ac:#60a5fa;--red:#f87171;--grn:#4ade80}}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--tx);line-height:1.5}
+.wrap{max-width:980px;margin:0 auto;padding:24px 16px 48px}
+h1{font-size:1.5rem;margin:0 0 4px}h2{font-size:1.05rem;margin:0 0 12px}
+.sub{color:var(--mut);margin:0 0 20px;font-size:.92rem}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:18px;margin-bottom:16px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
+label{display:block;font-size:.82rem;color:var(--mut);margin-bottom:4px}
+input,select{width:100%;padding:8px 10px;border:1px solid var(--bd);border-radius:8px;background:var(--bg);color:var(--tx);font-size:.95rem}
+button{background:var(--ac);color:#fff;border:0;border-radius:8px;padding:10px 18px;font-size:.95rem;cursor:pointer;font-weight:600}
+button:disabled{opacity:.5;cursor:not-allowed}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.stat{border:1px solid var(--bd);border-radius:10px;padding:10px 12px}
+.stat b{display:block;font-size:1.25rem}.stat span{font-size:.78rem;color:var(--mut)}
+.big b{color:var(--red);font-size:1.9rem}
+canvas{width:100%;height:auto;display:block}
+.note{font-size:.82rem;color:var(--mut);margin-top:8px}
+.err{color:var(--red);font-size:.9rem;margin-top:8px}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px}
+.chk{display:flex;align-items:center;gap:6px;font-size:.88rem}.chk input{width:auto}
+#hasil{display:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>Simulasi Monte Carlo Risiko Harga Saham</h1>
+<p class="sub">TA-03 Pemodelan dan Simulasi · Topik: Forecasting Harga Saham · Muhammad Fadillah Ramadhan (301240051)</p>
+
+<div class="card">
+<h2>1. Data historis (CSV dari Kaggle)</h2>
+<div class="grid">
+<div><label>Upload CSV (kolom Date &amp; Close/Adj Close)</label><input type="file" id="file" accept=".csv,text/csv"></div>
+<div><label>Kolom harga</label><select id="col"><option>(upload file dulu)</option></select></div>
+</div>
+<div class="chk row"><input type="checkbox" id="outl" checked><label for="outl" style="margin:0">Buang outlier ekstrem (|return − μ| &gt; 5σ)</label></div>
+<div id="dataInfo" class="note">Belum ada data. Tanpa upload, isi parameter manual di bawah (mode manual).</div>
+<div id="err" class="err"></div>
+</div>
+
+<div class="card">
+<h2>2. Parameter simulasi</h2>
+<div class="grid">
+<div><label>Harga awal S₀</label><input type="number" id="s0" value="250" step="any"></div>
+<div><label>Rata-rata return harian μ</label><input type="number" id="mu" value="0.0015" step="any"></div>
+<div><label>Std dev return harian σ</label><input type="number" id="sd" value="0.035" step="any"></div>
+<div><label>Horizon (hari)</label><input type="number" id="days" value="30" min="1"></div>
+<div><label>Jumlah skenario (min 5.000)</label><input type="number" id="n" value="10000" min="5000" max="200000" step="1000"></div>
+<div><label>Batas penurunan (%)</label><input type="number" id="thr" value="10" step="any"></div>
+<div><label>Seed</label><input type="number" id="seed" value="301240051"></div>
+</div>
+<div class="row"><button id="run">Jalankan Simulasi</button></div>
+<div class="note">Model: P<sub>t</sub> = P<sub>t−1</sub> × (1 + r), dengan r ~ Normal(μ, σ). Nilai default hanyalah contoh; upload data Kaggle untuk parameter nyata.</div>
+</div>
+
+<div id="hasil">
+<div class="card" id="cardHist" style="display:none">
+<h2>Histogram return harian (data asli)</h2>
+<canvas id="cHist" width="900" height="300"></canvas>
+</div>
+<div class="card">
+<h2>3. Hasil analisis risiko</h2>
+<div class="stats">
+<div class="stat big"><b id="pDrop">–</b><span id="pDropLbl">P(harga turun &gt; 10% dalam 30 hari)</span></div>
+<div class="stat"><b id="pAny">–</b><span>P(sempat turun &gt; batas kapan saja)</span></div>
+<div class="stat"><b id="mean">–</b><span>Rata-rata harga akhir</span></div>
+<div class="stat"><b id="p5">–</b><span>Persentil 5% (VaR 95%)</span></div>
+<div class="stat"><b id="p95">–</b><span>Persentil 95%</span></div>
+<div class="stat"><b id="ci">–</b><span>Interval kepercayaan 95% (probabilitas)</span></div>
+</div>
+</div>
+<div class="card"><h2>Distribusi harga akhir</h2><canvas id="cFinal" width="900" height="360"></canvas></div>
+<div class="card"><h2>Contoh 100 jalur harga</h2><canvas id="cPaths" width="900" height="340"></canvas></div>
+<div class="card"><h2>Kesimpulan</h2><p id="kes" style="margin:0"></p></div>
+</div>
+</div>
+
+<script>
+// ---------- util ----------
+const $=id=>document.getElementById(id);
+const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const fmt=(x,d=2)=>x.toLocaleString('id-ID',{minimumFractionDigits:d,maximumFractionDigits:d});
+let prices=null,dates=null,returns=null,hdr=[];
+
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+function makeNormal(rng){let spare=null;return function(){if(spare!==null){const s=spare;spare=null;return s}
+ let u=0,v=0;while(u===0)u=rng();v=rng();const m=Math.sqrt(-2*Math.log(u));spare=m*Math.sin(2*Math.PI*v);return m*Math.cos(2*Math.PI*v)}}
+function mean(a){let s=0;for(const x of a)s+=x;return s/a.length}
+function std(a){const m=mean(a);let s=0;for(const x of a)s+=(x-m)**2;return Math.sqrt(s/(a.length-1))}
+function pct(sorted,p){const i=(sorted.length-1)*p,lo=Math.floor(i),hi=Math.ceil(i);return sorted[lo]+(sorted[hi]-sorted[lo])*(i-lo)}
+
+// ---------- CSV ----------
+function parseLine(line,d){const out=[];let cur='',q=false;for(let i=0;i<line.length;i++){const c=line[i];
+ if(c=='"'){if(q&&line[i+1]=='"'){cur+='"';i++}else q=!q}else if(c==d&&!q){out.push(cur);cur=''}else cur+=c}out.push(cur);return out}
+function toNum(s){if(s==null)return NaN;s=String(s).replace(/[$,\s]/g,'');return s===''?NaN:parseFloat(s)}
+$('file').addEventListener('change',e=>{
+ const f=e.target.files[0];if(!f)return;$('err').textContent='';
+ const r=new FileReader();r.onload=()=>loadCSV(r.result);r.readAsText(f)});
+let rows=[];
+function loadCSV(text){
+ try{
+  const lines=text.split(/\r?\n/).filter(l=>l.trim());
+  const d=(lines[0].split(';').length>lines[0].split(',').length)?';':',';
+  hdr=parseLine(lines[0],d).map(h=>h.trim());
+  rows=lines.slice(1).map(l=>parseLine(l,d));
+  const sel=$('col');sel.innerHTML='';
+  hdr.forEach((h,i)=>{const o=document.createElement('option');o.value=i;o.textContent=h;sel.appendChild(o)});
+  const pref=['adj close','adj_close','close','close/last','price','harga','penutupan'];
+  let pick=-1;for(const p of pref){pick=hdr.findIndex(h=>h.toLowerCase()===p);if(pick>=0)break}
+  if(pick<0)pick=hdr.findIndex(h=>/close|price|harga/i.test(h));
+  if(pick>=0)sel.value=pick;
+  processData();
+ }catch(err){$('err').textContent='Gagal membaca CSV: '+err.message}
+}
+$('col').addEventListener('change',processData);$('outl').addEventListener('change',()=>{if(rows.length)processData()});
+function processData(){
+ $('err').textContent='';
+ const ci=parseInt($('col').value);
+ let di=hdr.findIndex(h=>/date|tanggal|time/i.test(h));
+ let recs=rows.map(r=>({d:di>=0?new Date(r[di]):null,p:toNum(r[ci])})).filter(x=>isFinite(x.p)&&x.p>0);
+ if(recs.length<30){$('err').textContent='Data valid kurang dari 30 baris. Cek pilihan kolom harga.';return}
+ if(di>=0&&recs[0].d&&recs[recs.length-1].d&&recs[0].d>recs[recs.length-1].d)recs.reverse();
+ let p=recs.map(x=>x.p),ret=[];
+ for(let i=1;i<p.length;i++)ret.push(p[i]/p[i-1]-1);
+ const n0=ret.length;
+ if($('outl').checked){const m=mean(ret),s=std(ret);ret=ret.filter(r=>Math.abs(r-m)<=5*s)}
+ prices=p;returns=ret;
+ const m=mean(ret),s=std(ret);
+ $('s0').value=p[p.length-1];$('mu').value=m.toFixed(6);$('sd').value=s.toFixed(6);
+ const dd=di>=0&&recs[0].d&&!isNaN(recs[0].d)?` (${recs[0].d.toISOString().slice(0,10)} s.d. ${recs[recs.length-1].d.toISOString().slice(0,10)})`:'';
+ $('dataInfo').innerHTML=`Dimuat <b>${p.length}</b> harga${dd}. Return dihitung: ${n0}, dipakai setelah cleaning: ${ret.length}. μ = <b>${m.toFixed(6)}</b>, σ = <b>${s.toFixed(6)}</b>, S₀ = harga terakhir = <b>${fmt(p[p.length-1])}</b>.`;
+ $('hasil').style.display='block';$('cardHist').style.display='block';
+ drawReturnHist(ret,m,s);
+}
+
+// ---------- charts ----------
+function setup(c){const ctx=c.getContext('2d');ctx.clearRect(0,0,c.width,c.height);return ctx}
+function axes(ctx,c,L,T,R,B,xmin,xmax,ymin,ymax,xl,yl,xf){
+ const W=c.width,H=c.height;ctx.strokeStyle=css('--bd');ctx.fillStyle=css('--mut');ctx.font='12px system-ui';ctx.lineWidth=1;
+ ctx.beginPath();ctx.moveTo(L,T);ctx.lineTo(L,H-B);ctx.lineTo(W-R,H-B);ctx.stroke();
+ for(let i=0;i<=5;i++){const x=L+(W-L-R)*i/5,v=xmin+(xmax-xmin)*i/5;ctx.textAlign='center';ctx.fillText(xf?xf(v):fmt(v,2),x,H-B+16)}
+ for(let i=0;i<=4;i++){const y=H-B-(H-T-B)*i/4,v=ymin+(ymax-ymin)*i/4;ctx.textAlign='right';ctx.fillText(fmt(v,v<1&&v>0?3:0),L-6,y+4);ctx.strokeStyle=css('--bd');ctx.globalAlpha=.4;ctx.beginPath();ctx.moveTo(L,y);ctx.lineTo(W-R,y);ctx.stroke();ctx.globalAlpha=1}
+ ctx.textAlign='center';ctx.fillText(xl,(L+W-R)/2,H-4);
+}
+function hist(data,bins,lo,hi){const h=new Array(bins).fill(0),w=(hi-lo)/bins;for(const v of data){let k=Math.floor((v-lo)/w);if(k<0||k>=bins){if(v===hi)k=bins-1;else continue}h[k]++}return h}
+function drawReturnHist(ret,m,s){
+ const c=$('cHist'),ctx=setup(c),W=c.width,H=c.height,L=50,T=14,R=14,B=40;
+ const sorted=[...ret].sort((a,b)=>a-b),lo=pct(sorted,.005),hi=pct(sorted,.995),bins=50;
+ const h=hist(ret,bins,lo,hi),w=(hi-lo)/bins,dens=h.map(x=>x/ret.length/w),ymax=Math.max(...dens)*1.1;
+ axes(ctx,c,L,T,R,B,lo,hi,0,ymax,'Return harian','Densitas',v=>(v*100).toFixed(1)+'%');
+ const bw=(W-L-R)/bins;ctx.fillStyle=css('--ac');ctx.globalAlpha=.65;
+ dens.forEach((d,i)=>{const bh=(H-T-B)*d/ymax;ctx.fillRect(L+i*bw+1,H-B-bh,bw-2,bh)});ctx.globalAlpha=1;
+ ctx.strokeStyle=css('--red');ctx.lineWidth=2;ctx.beginPath();
+ for(let i=0;i<=200;i++){const x=lo+(hi-lo)*i/200,y=Math.exp(-0.5*((x-m)/s)**2)/(s*Math.sqrt(2*Math.PI));
+  const px=L+(W-L-R)*i/200,py=H-B-(H-T-B)*y/ymax;i?ctx.lineTo(px,py):ctx.moveTo(px,py)}ctx.stroke();
+ ctx.fillStyle=css('--red');ctx.textAlign='right';ctx.fillText('— kurva Normal(μ,σ)',W-R,T+12);
+}
+
+// ---------- simulasi ----------
+$('run').addEventListener('click',()=>{
+ $('err').textContent='';
+ const S0=+$('s0').value,mu=+$('mu').value,sd=+$('sd').value,days=Math.max(1,Math.floor(+$('days').value)),
+  N=Math.floor(+$('n').value),thr=+$('thr').value/100,seed=Math.floor(+$('seed').value);
+ if(!(S0>0)||!(sd>0)||!isFinite(mu)){$('err').textContent='Parameter tidak valid (S₀>0, σ>0).';return}
+ if(N<5000){$('err').textContent='Jumlah skenario minimal 5.000.';return}
+ const rng=mulberry32(seed),norm=makeNormal(rng),finals=new Float64Array(N);
+ const level=S0*(1-thr);let dropEnd=0,dropAny=0;const paths=[];
+ for(let i=0;i<N;i++){let p=S0,hit=false;const keep=i<100,path=keep?[S0]:null;
+  for(let t=0;t<days;t++){p*=1+(mu+sd*norm());if(p<0)p=0;if(p<=level)hit=true;if(keep)path.push(p)}
+  finals[i]=p;if(p<=level)dropEnd++;if(hit)dropAny++;if(keep)paths.push(path)}
+ const pEnd=dropEnd/N,pAny=dropAny/N,se=Math.sqrt(pEnd*(1-pEnd)/N);
+ const sorted=Float64Array.from(finals).sort(),m=mean(finals);
+ $('hasil').style.display='block';
+ $('pDropLbl').innerHTML=`P(harga turun &gt; ${fmt(thr*100,0)}% dalam ${days} hari)`;
+ $('pDrop').textContent=fmt(pEnd*100,2)+'%';$('pAny').textContent=fmt(pAny*100,2)+'%';
+ $('mean').textContent=fmt(m);$('p5').textContent=fmt(pct(sorted,.05));$('p95').textContent=fmt(pct(sorted,.95));
+ $('ci').textContent=`${fmt(Math.max(0,pEnd-1.96*se)*100,2)}% – ${fmt(Math.min(1,pEnd+1.96*se)*100,2)}%`;
+ drawFinal(finals,level,S0);drawPaths(paths,level,S0);
+ $('kes').innerHTML=`Dari <b>${N.toLocaleString('id-ID')}</b> skenario dengan μ = ${mu.toFixed(6)} dan σ = ${sd.toFixed(6)}, probabilitas harga akhir hari ke-${days} berada di bawah ${fmt(level)} (turun lebih dari ${fmt(thr*100,0)}% dari ${fmt(S0)}) adalah <b>${fmt(pEnd*100,2)}%</b>. Persentil 5% harga akhir adalah ${fmt(pct(sorted,.05))}, artinya dengan keyakinan 95% harga tidak jatuh di bawah level tersebut. Asumsi: return harian berdistribusi normal dan independen, sehingga risiko ekor (kejadian ekstrem) cenderung diremehkan.`;
+ $('hasil').scrollIntoView({behavior:'smooth'});
+});
+function drawFinal(f,level,S0){
+ const c=$('cFinal'),ctx=setup(c),W=c.width,H=c.height,L=50,T=14,R=14,B=40;
+ const s=Float64Array.from(f).sort(),lo=pct(s,.001),hi=pct(s,.999),bins=60,h=hist(f,bins,lo,hi),ymax=Math.max(...h)*1.1;
+ axes(ctx,c,L,T,R,B,lo,hi,0,ymax,'Harga akhir','Frekuensi',v=>fmt(v,0));
+ const bw=(W-L-R)/bins,w=(hi-lo)/bins;
+ h.forEach((v,i)=>{const x0=lo+i*w,bh=(H-T-B)*v/ymax;ctx.fillStyle=(x0+w<=level)?css('--red'):css('--ac');ctx.globalAlpha=.75;ctx.fillRect(L+i*bw+1,H-B-bh,bw-2,bh)});ctx.globalAlpha=1;
+ const xt=L+(W-L-R)*(level-lo)/(hi-lo);ctx.strokeStyle=css('--red');ctx.setLineDash([6,4]);ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(xt,T);ctx.lineTo(xt,H-B);ctx.stroke();ctx.setLineDash([]);
+ ctx.fillStyle=css('--red');ctx.textAlign='left';ctx.fillText('Batas risiko '+fmt(level,2),xt+6,T+14);
+ const xs=L+(W-L-R)*(S0-lo)/(hi-lo);if(xs>L&&xs<W-R){ctx.strokeStyle=css('--grn');ctx.beginPath();ctx.moveTo(xs,T);ctx.lineTo(xs,H-B);ctx.stroke();ctx.fillStyle=css('--grn');ctx.fillText('S₀ '+fmt(S0,2),xs+6,T+30)}
+}
+function drawPaths(paths,level,S0){
+ const c=$('cPaths'),ctx=setup(c),W=c.width,H=c.height,L=50,T=14,R=14,B=40,days=paths[0].length-1;
+ let lo=Infinity,hi=-Infinity;paths.forEach(p=>p.forEach(v=>{if(v<lo)lo=v;if(v>hi)hi=v}));lo=Math.min(lo,level);
+ axes(ctx,c,L,T,R,B,0,days,lo,hi,'Hari','Harga',v=>v.toFixed(0));
+ const X=t=>L+(W-L-R)*t/days,Y=v=>H-B-(H-T-B)*(v-lo)/(hi-lo);
+ paths.forEach(p=>{const bad=p[p.length-1]<=level;ctx.strokeStyle=bad?css('--red'):css('--ac');ctx.globalAlpha=bad?.55:.22;ctx.lineWidth=1;ctx.beginPath();p.forEach((v,t)=>t?ctx.lineTo(X(t),Y(v)):ctx.moveTo(X(t),Y(v)));ctx.stroke()});
+ ctx.globalAlpha=1;ctx.strokeStyle=css('--red');ctx.setLineDash([6,4]);ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(L,Y(level));ctx.lineTo(W-R,Y(level));ctx.stroke();ctx.setLineDash([]);
+}
+</script>
+</body>
+</html>
